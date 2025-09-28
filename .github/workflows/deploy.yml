@@ -1,0 +1,191 @@
+name: Build and Deploy to ECS
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+  BACKEND_REPOSITORY: paytm-backend
+  FRONTEND_REPOSITORY: paytm-frontend
+
+jobs:
+  # Build and test backend
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: backend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd backend
+        npm ci
+
+    - name: Run tests
+      run: |
+        cd backend
+        npm test -- --coverage --watchAll=false
+
+    - name: Build Docker image
+      run: |
+        cd backend
+        docker build -t $ECR_REGISTRY/$BACKEND_REPOSITORY:${{ github.sha }} .
+        docker build -t $ECR_REGISTRY/$BACKEND_REPOSITORY:latest .
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Push backend image to ECR
+      if: github.ref == 'refs/heads/main'
+      run: |
+        docker push $ECR_REGISTRY/$BACKEND_REPOSITORY:${{ github.sha }}
+        docker push $ECR_REGISTRY/$BACKEND_REPOSITORY:latest
+
+  # Build and test frontend
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: frontend/package-lock.json
+
+    - name: Install dependencies
+      run: |
+        cd frontend
+        npm ci
+
+    - name: Run linting
+      run: |
+        cd frontend
+        npm run lint
+
+    - name: Build application
+      run: |
+        cd frontend
+        npm run build
+
+    - name: Build Docker image
+      run: |
+        cd frontend
+        docker build -t $ECR_REGISTRY/$FRONTEND_REPOSITORY:${{ github.sha }} .
+        docker build -t $ECR_REGISTRY/$FRONTEND_REPOSITORY:latest .
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v2
+
+    - name: Push frontend image to ECR
+      if: github.ref == 'refs/heads/main'
+      run: |
+        docker push $ECR_REGISTRY/$FRONTEND_REPOSITORY:${{ github.sha }}
+        docker push $ECR_REGISTRY/$FRONTEND_REPOSITORY:latest
+
+  # Deploy to ECS
+  deploy:
+    name: Deploy to ECS
+    needs: [build-backend, build-frontend]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ env.AWS_REGION }}
+
+    - name: Update backend ECS service
+      run: |
+        aws ecs update-service \
+          --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+          --service ${{ secrets.BACKEND_SERVICE_NAME }} \
+          --force-new-deployment
+
+    - name: Update frontend ECS service
+      run: |
+        aws ecs update-service \
+          --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+          --service ${{ secrets.FRONTEND_SERVICE_NAME }} \
+          --force-new-deployment
+
+    - name: Wait for backend deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+          --services ${{ secrets.BACKEND_SERVICE_NAME }}
+
+    - name: Wait for frontend deployment
+      run: |
+        aws ecs wait services-stable \
+          --cluster ${{ secrets.ECS_CLUSTER_NAME }} \
+          --services ${{ secrets.FRONTEND_SERVICE_NAME }}
+
+    - name: Deployment notification
+      run: |
+        echo "🚀 Deployment completed successfully!"
+        echo "Backend service: ${{ secrets.BACKEND_SERVICE_NAME }}"
+        echo "Frontend service: ${{ secrets.FRONTEND_SERVICE_NAME }}"
+        echo "Cluster: ${{ secrets.ECS_CLUSTER_NAME }}"
+
+  # Security scan
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Run Trivy vulnerability scanner
+      uses: aquasecurity/trivy-action@master
+      with:
+        scan-type: 'fs'
+        scan-ref: '.'
+        format: 'sarif'
+        output: 'trivy-results.sarif'
+
+    - name: Upload Trivy scan results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v2
+      if: always()
+      with:
+        sarif_file: 'trivy-results.sarif'
