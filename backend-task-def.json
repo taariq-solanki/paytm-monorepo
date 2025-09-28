@@ -1,0 +1,36 @@
+{
+    "family": "paytm-backend-task",
+    "requiresCompatibilities": ["FARGATE"],
+    "networkMode": "awsvpc",
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::031857855591:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+      {
+        "name": "paytm-backend",
+        "image": "031857855591.dkr.ecr.ap-south-1.amazonaws.com/paytm-backend:latest",
+        "essential": true,
+        "portMappings": [
+          {
+            "containerPort": 4000,
+            "protocol": "tcp"
+          }
+        ],
+        "environment": [
+          {
+            "name": "MONGO_URI",
+            "value": "mongodb://your-mongo-uri:27017/paytm_db"
+          }
+        ],
+        "logConfiguration": {
+          "logDriver": "awslogs",
+          "options": {
+            "awslogs-group": "/ecs/paytm-backend",
+            "awslogs-region": "ap-south-1",
+            "awslogs-stream-prefix": "ecs"
+          }
+        }
+      }
+    ]
+  }
+  

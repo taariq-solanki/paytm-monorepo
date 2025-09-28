@@ -1,0 +1,30 @@
+{
+    "family": "paytm-frontend-task",
+    "requiresCompatibilities": ["FARGATE"],
+    "networkMode": "awsvpc",
+    "cpu": "256",
+    "memory": "512",
+    "executionRoleArn": "arn:aws:iam::031857855591:role/ecsTaskExecutionRole",
+    "containerDefinitions": [
+      {
+        "name": "paytm-frontend",
+        "image": "031857855591.dkr.ecr.ap-south-1.amazonaws.com/paytm-frontend:latest",
+        "essential": true,
+        "portMappings": [
+          {
+            "containerPort": 80,
+            "protocol": "tcp"
+          }
+        ],
+        "logConfiguration": {
+          "logDriver": "awslogs",
+          "options": {
+            "awslogs-group": "/ecs/paytm-frontend",
+            "awslogs-region": "ap-south-1",
+            "awslogs-stream-prefix": "ecs"
+          }
+        }
+      }
+    ]
+  }
+  
